@@ -1,13 +1,22 @@
-# SearXNG Gemini Stream Plugin
+# SearXNG Gemini Stream
 
-This is a SearXNG plugin that provides live AI search answers using Google Gemini Flash.
+A SearXNG plugin that streams an AI response using results as grounding context to an Answer box at the top of results.
 
 ## Configuration
 
 Set the following environment variables:
 - `GEMINI_API_KEY`: Your Google Gemini API key.
-- `GEMINI_MODEL`: (Optional) The model to use, defaults to `gemini-3-flash-preview`.
+- `GEMINI_MODEL`: (Optional) Defaults to `gemini-3-flash-preview`.
+
+### settings.yml
+Add this to your SearXNG configuration file to enable the plugin:
+
+```yaml
+plugins:
+  - name: gemini_flash
+    active: true
+```
 
 ## Installation
 
-This file should be placed in the `searx/plugins` directory of your SearXNG instance or configured as a plugin.
+Place `gemini_flash.py` into the `searx/plugins` directory of your instance.

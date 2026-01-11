@@ -18,7 +18,6 @@ class SXNGPlugin(Plugin):
             description=gettext("Live AI search answers using Google Gemini Flash"),
             preference_section="general", 
         )
-        self.active = plg_cfg.active
         self.api_key = os.getenv('GEMINI_API_KEY')
         self.model = os.getenv('GEMINI_MODEL', 'gemini-3-flash-preview')
         self.tokens = {}
@@ -123,12 +122,9 @@ USER QUERY: {q}
 
         @app.route('/gemini.js')
         def g_script():
-            # Get parameters from the SCRIPT SRC url
             token = request.args.get('token', '')
             query = request.args.get('q', '')
             
-            # Safe injection of query into the JS string
-            # We use json.dumps to ensure it is a valid JS string literal (handles quotes/escapes)
             js_query = json.dumps(query)
             js_token = json.dumps(token)
 
@@ -160,6 +156,8 @@ USER QUERY: {q}
             }})();
             """
             return Response(js_code, mimetype='application/javascript')
+        
+        return True
 
     def post_search(self, request, search) -> EngineResults:
         results = EngineResults()
