@@ -18,9 +18,9 @@ class SXNGPlugin(Plugin):
             description=gettext("Live AI search answers using Google Gemini Flash"),
             preference_section="general", 
         )
-        self.provider = os.getenv('LLM_PROVIDER', 'gemini').lower()
+        self.provider = os.getenv('LLM_PROVIDER', 'openrouter').lower()
         self.api_key = os.getenv('OPENROUTER_API_KEY') if self.provider == 'openrouter' else os.getenv('GEMINI_API_KEY')
-        self.model = os.getenv('GEMINI_MODEL', 'gemini-1.5-flash') if self.provider == 'gemini' else os.getenv('OPENROUTER_MODEL', 'google/gemini-2.0-flash-exp:free')
+        self.model = os.getenv('GEMINI_MODEL', 'gemini-1.5-flash') if self.provider == 'gemini' else os.getenv('OPENROUTER_MODEL', 'google/gemma-3-27b-it:free')
         self.max_tokens = int(os.getenv('GEMINI_MAX_TOKENS', 500))
         self.temperature = float(os.getenv('GEMINI_TEMPERATURE', 0.2))
         self.base_url = os.getenv('OPENROUTER_BASE_URL', 'openrouter.ai')

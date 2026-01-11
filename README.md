@@ -7,7 +7,7 @@ A SearXNG plugin that streams AI responses using search results as grounding con
 Set the following environment variables:
 
 ### General
-- `LLM_PROVIDER`: `gemini` (default) or `openrouter`.
+- `LLM_PROVIDER`: `openrouter` (default) or `gemini`.
 - `GEMINI_MAX_TOKENS`: Defaults to `500`.
 - `GEMINI_TEMPERATURE`: Defaults to `0.2`.
 
@@ -17,7 +17,7 @@ Set the following environment variables:
 
 ### OpenRouter / OpenAI / Ollama
 - `OPENROUTER_API_KEY`: Your API key.
-- `OPENROUTER_MODEL`: e.g., `meta-llama/llama-3-8b-instruct:free`.
+- `OPENROUTER_MODEL`: Defaults to `google/gemma-3-27b-it:free`.
 - `OPENROUTER_BASE_URL`: Defaults to `openrouter.ai`. (Change to `localhost:11434` for Ollama).
 
 ## Installation
