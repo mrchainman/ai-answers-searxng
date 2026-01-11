@@ -46,6 +46,16 @@ class SXNGPlugin(Plugin):
             if not self.api_key or not q:
                 return Response("Error: Missing Key", status=400)
 
+            prompt = (
+                f"SYSTEM: Answer USER QUERY by integrating SEARCH RESULTS with expert knowledge.\n"
+                f"HIERARCHY: Use RESULTS for facts/data. Use KNOWLEDGE for context/synthesis.\n"
+                f"CONSTRAINTS: <4 sentences | Dense information | Complete thoughts.\n"
+                f"FALLBACK: If results are empty, answer from knowledge but note the lack of sources.\n\n"
+                f"SEARCH RESULTS:\n{context_text}\n\n"
+                f"USER QUERY: {q}\n\n"
+                f"ANSWER:"
+            )
+
             def generate_gemini():
                 host = "generativelanguage.googleapis.com"
                 path = f"/v1/models/{self.model}:streamGenerateContent?key={self.api_key}"
@@ -135,9 +145,10 @@ class SXNGPlugin(Plugin):
         context_list = [f"[{i+1}] {r.get('title')}: {r.get('content')}" for i, r in enumerate(raw_results[:6])]
         context_str = "\n".join(context_list)
 
-        ts = str(time.time())
+        # Stateless Handshake
+        ts = str(int(time.time()))
         q_clean = search.search_query.query.strip()
-        sig = hashlib.sha256(f"{ts}|{q_clean}|{self.secret}".encode()).hexdigest()
+        sig = hashlib.sha256(f"{ts}{q_clean}{self.secret}".encode()).hexdigest()
         tk = f"{ts}.{sig}"
 
         b64_context = base64.b64encode(context_str.encode('utf-8')).decode('utf-8')
