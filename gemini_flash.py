@@ -219,7 +219,7 @@ class SXNGPlugin(Plugin):
                         if (chunk) {{
                             let text = chunk;
                             if (!started) {{
-                                text = text.replace(/^[\\s.,;:!?]+/, '');
+                                text = text.replace(/^[\s.,;:!?]+/, '');
                                 if (!text) continue;
                                 data.appendChild(cursor);
                                 box.style.display = 'block';
