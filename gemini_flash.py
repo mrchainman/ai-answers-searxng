@@ -172,67 +172,64 @@ class SXNGPlugin(Plugin):
             js_q = json.dumps(q_clean)
 
             html_payload = f'''
-            <style>
-                @keyframes sxng-blink {{ 0%, 100% {{ opacity: 1; }} 50% {{ opacity: 0; }} }}
-                .sxng-cursor {{ 
-                    display: inline-block; width: 0.5rem; height: 1rem; 
-                    background: var(--color-result-description); 
-                    margin-left: 2px; vertical-align: middle;
-                    animation: sxng-blink 1s step-end infinite;
-                }}
-            </style>
             <article id="sxng-stream-box" class="answer" style="display:none; margin-bottom: 1rem;">
-                <p id="sxng-stream-data" style="white-space: pre-wrap; color: var(--color-result-description); font-size: 0.95rem;"></p>
-            </article>
-            <script>
-            (async () => {{
-                const q = {js_q};
-                const b64 = "{b64_context}";
-                const tk = "{tk}";
-                const box = document.getElementById('sxng-stream-box');
-                const data = document.getElementById('sxng-stream-data');
-                
-                const container = document.getElementById('urls') || document.getElementById('main_results');
-                if (container && box) {{ container.prepend(box); }}
-
-                try {{
-                    const ctx = new TextDecoder().decode(Uint8Array.from(atob(b64), c => c.charCodeAt(0)));
-                    const res = await fetch('/gemini-stream', {{
-                        method: 'POST',
-                        headers: {{ 'Content-Type': 'application/json' }},
-                        body: JSON.stringify({{ q: q, context: ctx, tk: tk }})
-                    }});
-                    
-                    if (!res.ok) {{ box.remove(); return; }}
-
-                    const reader = res.body.getReader();
-                    const decoder = new TextDecoder();
-                    const cursor = document.createElement('span');
-                    cursor.className = 'sxng-cursor';
-                    
-                    let started = false;
-                    while (true) {{
-                        const {{done, value}} = await reader.read();
-                        if (done) break;
-                        
-                        const chunk = decoder.decode(value);
-                        if (chunk) {{
-                            let text = chunk;
-                            if (!started) {{
-                                text = text.replace(/^[\s.,;:!?]+/, '');
-                                if (!text) continue;
-                                data.appendChild(cursor);
-                                box.style.display = 'block';
-                                started = true; 
-                            }}
-                            cursor.before(text);
-                        }}
+                <style>
+                    @keyframes sxng-blink {{ 0%, 100% {{ opacity: 1; }} 50% {{ opacity: 0; }} }}
+                    .sxng-cursor {{ 
+                        display: inline-block; width: 0.5rem; height: 1rem; 
+                        background: var(--color-result-description); 
+                        margin-left: 2px; vertical-align: middle;
+                        animation: sxng-blink 1s step-end infinite;
                     }}
-                    cursor.remove();
-                    if (!started) box.remove();
-                }} catch (e) {{ console.error(e); box.remove(); }}
-            }})();
-            </script>
+                </style>
+                <p id="sxng-stream-data" style="white-space: pre-wrap; color: var(--color-result-description); font-size: 0.95rem;"></p>
+                <script>
+                (async () => {{
+                    const q = {js_q};
+                    const b64 = "{b64_context}";
+                    const tk = "{tk}";
+                    const box = document.getElementById('sxng-stream-box');
+                    const data = document.getElementById('sxng-stream-data');
+                    
+                    try {{
+                        const ctx = new TextDecoder().decode(Uint8Array.from(atob(b64), c => c.charCodeAt(0)));
+                        const res = await fetch('/gemini-stream', {{
+                            method: 'POST',
+                            headers: {{ 'Content-Type': 'application/json' }},
+                            body: JSON.stringify({{ q: q, context: ctx, tk: tk }})
+                        }});
+                        
+                        if (!res.ok) {{ box.remove(); return; }}
+
+                        const reader = res.body.getReader();
+                        const decoder = new TextDecoder();
+                        const cursor = document.createElement('span');
+                        cursor.className = 'sxng-cursor';
+                        
+                        let started = false;
+                        while (true) {{
+                            const {{done, value}} = await reader.read();
+                            if (done) break;
+                            
+                            const chunk = decoder.decode(value);
+                            if (chunk) {{
+                                let text = chunk;
+                                if (!started) {{
+                                    text = text.replace(/^[\\s.,;:!?]+/, '');
+                                    if (!text) continue;
+                                    data.appendChild(cursor);
+                                    box.style.display = 'block';
+                                    started = true; 
+                                }}
+                                cursor.before(text);
+                            }}
+                        }}
+                        cursor.remove();
+                        if (!started) box.remove();
+                    }} catch (e) {{ console.error(e); box.remove(); }}
+                }})();
+                </script>
+            </article>
             '''
             search.result_container.answers.add(results.types.Answer(answer=Markup(html_payload)))
         except Exception as e:
