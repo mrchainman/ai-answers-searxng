@@ -1,8 +1,9 @@
-import json, secrets, time, http.client, ssl, os, logging
+import json, secrets, time, http.client, ssl, os, logging, html, urllib.parse
 from flask import Response, request, abort
 from searx.plugins import Plugin, PluginInfo
 from searx.result_types import EngineResults
 from flask_babel import gettext
+from markupsafe import Markup
 
 logger = logging.getLogger(__name__)
 
@@ -33,14 +34,11 @@ class SXNGPlugin(Plugin):
             t = request.args.get('token')
             q = request.args.get('q', '')
             
-            logger.info(f"[{self.id}] Stream requested. Token: {t[:5]}...")
-
-            # Maintenance: Only runs when a stream is requested, not during search.
+            # Maintenance
             current_time = time.time()
             self.tokens = {k: v for k, v in self.tokens.items() if v > current_time}
             
             if t not in self.tokens or not self.api_key:
-                logger.warning(f"[{self.id}] Unauthorized stream attempt or missing key.")
                 abort(403)
             del self.tokens[t]
 
@@ -48,14 +46,12 @@ class SXNGPlugin(Plugin):
                 host = "generativelanguage.googleapis.com"
                 path = f"/v1beta/models/{self.model}:streamGenerateContent?key={self.api_key}"
                 try:
-                    logger.info(f"[{self.id}] Connecting to Google API...")
                     context = ssl.create_default_context()
                     conn = http.client.HTTPSConnection(host, context=context)
                     conn.request("POST", path, body=json.dumps({"contents": [{"parts": [{"text": q}]}]}), 
                                  headers={"Content-Type": "application/json"})
                     res = conn.getresponse()
                     
-                    logger.info(f"[{self.id}] Google API connected. Streaming...")
                     buffer = ""
                     for chunk in res:
                         buffer += chunk.decode('utf-8')
@@ -78,41 +74,36 @@ class SXNGPlugin(Plugin):
                             except:
                                 buffer = buffer[end:]
                     conn.close()
-                    logger.info(f"[{self.id}] Stream finished.")
                 except Exception as e:
                     logger.error(f"[{self.id}] Stream error: {e}")
-                    yield f" [Stream Error: {str(e)}]"
+                    yield f" [Error: {str(e)}]"
 
             return Response(generate(), mimetype='text/plain')
 
-    def post_search(self, request, search) -> EngineResults:
-        logger.info(f"[{self.id}] post_search hook triggered. Page: {search.search_query.pageno}, Active: {self.active}, Key Present: {bool(self.api_key)}")
-        
-        results = EngineResults()
-        # Page 1 only + check for API key
-        if search.search_query.pageno > 1 or not self.active or not self.api_key:
-            logger.warning(f"[{self.id}] Skipping injection. Criteria failed.")
-            return results
+        @app.route('/gemini.js')
+        def g_script():
+            # Get parameters from the SCRIPT SRC url
+            token = request.args.get('token', '')
+            query = request.args.get('q', '')
+            
+            # Safe injection of query into the JS string
+            # We use json.dumps to ensure it is a valid JS string literal (handles quotes/escapes)
+            js_query = json.dumps(query)
+            js_token = json.dumps(token)
 
-        # ULTRA-LEAN EXECUTION: No loops, no maintenance. Just token creation and return.
-        tk = secrets.token_urlsafe(16)
-        self.tokens[tk] = time.time() + 90
-        
-        logger.info(f"[{self.id}] Injecting script for query: {search.search_query.query[:20]}...")
-
-        # Ensure we escape the query properly for JS
-        query_json = json.dumps(search.search_query.query)
-        
-        html = f"""
-        <div id="ai-shell" style="display:none; margin-bottom: 2rem; padding: 1.2rem; border-bottom: 1px solid var(--color-result-border);">
-            <div id="ai-out" style="line-height: 1.7; white-space: pre-wrap; color: var(--color-result-description); font-size: 0.95rem;"></div>
-        </div>
-        <script>
+            js_code = f"""
             (async () => {{
-                const out = document.getElementById('ai-out');
                 const shell = document.getElementById('ai-shell');
+                const out = document.getElementById('ai-out');
+                if (!shell || !out) return;
+                
+                const token = {js_token};
+                const query = {js_query};
+                
                 try {{
-                    const res = await fetch(`/gemini-stream?token={tk}&q=` + encodeURIComponent({query_json}));
+                    const res = await fetch(`/gemini-stream?token=${{token}}&q=` + encodeURIComponent(query));
+                    if (!res.ok) throw new Error(res.statusText);
+                    
                     const reader = res.body.getReader();
                     const decoder = new TextDecoder();
                     while (true) {{
@@ -124,9 +115,33 @@ class SXNGPlugin(Plugin):
                             out.innerText += chunk;
                         }}
                     }}
-                }} catch (e) {{ console.error("Gemini Failure", e); }}
+                }} catch (e) {{ console.error("Gemini Stream Failed", e); }}
             }})();
-        </script>
-        """
-        results.add(results.types.Answer(answer=html))
+            """
+            return Response(js_code, mimetype='application/javascript')
+
+    def post_search(self, request, search) -> EngineResults:
+        results = EngineResults()
+        if search.search_query.pageno > 1 or not self.active or not self.api_key:
+            return results
+
+        tk = secrets.token_urlsafe(16)
+        self.tokens[tk] = time.time() + 90
+        
+        logger.warning(f"[{self.id}] Injecting Answer for query: {search.search_query.query[:20]}...")
+
+        # Encode query for the URL parameter in the script tag
+        safe_query_param = urllib.parse.quote(search.search_query.query)
+        
+        # HTML Payload:
+        # 1. The Container (Hidden by default)
+        # 2. The Script Tag (Pointing to our dynamic route with params)
+        html_payload = f'''
+        <div id="ai-shell" style="display:none; margin-bottom: 2rem; padding: 1.2rem; border-bottom: 1px solid var(--color-result-border);">
+            <div id="ai-out" style="line-height: 1.7; white-space: pre-wrap; color: var(--color-result-description); font-size: 0.95rem;"></div>
+        </div>
+        <script src="/gemini.js?token={tk}&q={safe_query_param}"></script>
+        '''
+        
+        results.add(results.types.Answer(answer=Markup(html_payload)))
         return results
