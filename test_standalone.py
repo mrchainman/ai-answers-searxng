@@ -114,6 +114,11 @@ class PluginTestCase(unittest.TestCase):
         self.assertIn('/gemini-stream', content)
 
     def test_stream_endpoint(self):
+        # Trigger index to generate a token in the plugin instance
+        self.app.get('/')
+        # Extract the last generated token
+        token = list(plugin.valid_tokens.keys())[-1]
+
         # Check for the appropriate key based on provider
         key = os.getenv("OPENROUTER_API_KEY") if plugin.provider == 'openrouter' else os.getenv("GEMINI_API_KEY")
         if not key:
@@ -121,7 +126,8 @@ class PluginTestCase(unittest.TestCase):
 
         payload = {
             "q": "why is the sky blue",
-            "context": "The sky is blue because of Rayleigh scattering."
+            "context": "The sky is blue because of Rayleigh scattering.",
+            "tk": token
         }
         
         response = self.app.post('/gemini-stream', json=payload)

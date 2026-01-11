@@ -1,5 +1,5 @@
-import json, http.client, ssl, os, logging, base64
-from flask import Response, request
+import json, http.client, ssl, os, logging, base64, secrets, time
+from flask import Response, request, abort
 from searx.plugins import Plugin, PluginInfo
 from searx.result_types import EngineResults
 from flask_babel import gettext
@@ -24,11 +24,22 @@ class SXNGPlugin(Plugin):
         self.max_tokens = int(os.getenv('GEMINI_MAX_TOKENS', 500))
         self.temperature = float(os.getenv('GEMINI_TEMPERATURE', 0.2))
         self.base_url = os.getenv('OPENROUTER_BASE_URL', 'openrouter.ai')
+        self.valid_tokens = {}
 
     def init(self, app):
         @app.route('/gemini-stream', methods=['POST'])
         def g_stream():
             data = request.json or {}
+            token = data.get('tk', '')
+            
+            # Maintenance: Token validation & cleanup
+            now = time.time()
+            self.valid_tokens = {k: v for k, v in self.valid_tokens.items() if v > now}
+            
+            if token not in self.valid_tokens:
+                abort(403)
+            del self.valid_tokens[token]
+
             context_text = data.get('context', '')
             q = data.get('q', '')
 
@@ -61,7 +72,6 @@ class SXNGPlugin(Plugin):
                         chunk = res.read(128)
                         if not chunk: break
                         buffer += chunk.decode('utf-8')
-                        
                         while buffer:
                             buffer = buffer.lstrip()
                             if not buffer: break
@@ -99,6 +109,7 @@ class SXNGPlugin(Plugin):
                     res = conn.getresponse()
                     if res.status != 200: return
 
+                    decoder = json.JSONDecoder()
                     buffer = ""
                     while True:
                         chunk = res.read(128)
@@ -106,13 +117,12 @@ class SXNGPlugin(Plugin):
                         buffer += chunk.decode('utf-8')
                         while "\n" in buffer:
                             line, buffer = buffer.split("\n", 1)
-                            line = line.strip()
                             if line.startswith("data: "):
                                 data_str = line[6:].strip()
                                 if data_str == "[DONE]": return
                                 try:
-                                    data_json = json.loads(data_str)
-                                    content = data_json.get("choices", [{}])[0].get("delta", {}).get("content", "")
+                                    obj, _ = decoder.raw_decode(data_str)
+                                    content = obj.get("choices", [{}])[0].get("delta", {}).get("content", "")
                                     if content: yield content
                                 except: pass
                     conn.close()
@@ -131,61 +141,73 @@ class SXNGPlugin(Plugin):
         context_list = [f"[{i+1}] {r.get('title')}: {r.get('content')}" for i, r in enumerate(raw_results[:6])]
         context_str = "\n".join(context_list)
 
+        # Handshake token
+        tk = secrets.token_hex(16)
+        self.valid_tokens[tk] = time.time() + 60
+
         b64_context = base64.b64encode(context_str.encode('utf-8')).decode('utf-8')
         js_q = json.dumps(search.search_query.query)
 
         html_payload = f'''
         <style>
-            #sxng-stream-box {{ 
-                display: none !important; 
-                padding: 1rem !important; 
-                margin-top: 0 !important; 
-                margin-bottom: 1.5rem !important;
-                border-bottom: 1px solid var(--color-result-border);
-            }}
-            #sxng-stream-data {{ 
-                margin: 0 !important; 
-                line-height: 1.6; 
-                font-size: 0.95rem;
-                color: var(--color-result-description);
+            @keyframes sxng-blink {{ 0%, 100% {{ opacity: 1; }} 50% {{ opacity: 0; }} }}
+            .sxng-cursor {{ 
+                display: inline-block; width: 0.5rem; height: 1rem; 
+                background: var(--color-result-description); 
+                margin-left: 2px; vertical-align: middle;
+                animation: sxng-blink 1s step-end infinite;
             }}
         </style>
-        <article id="sxng-stream-box" class="answer">
-            <p id="sxng-stream-data" style="white-space: pre-wrap;"></p>
+        <article id="sxng-stream-box" class="answer" style="display:none; margin-bottom: 1rem;">
+            <p id="sxng-stream-data" style="white-space: pre-wrap; color: var(--color-result-description); font-size: 0.95rem;">
+                <i id="sxng-loading">Thinking...</i>
+            </p>
         </article>
         <script>
         (async () => {{
             const q = {js_q};
             const b64 = "{b64_context}";
+            const tk = "{tk}";
             const shell = document.getElementById('sxng-stream-box');
             const data = document.getElementById('sxng-stream-data');
+            const loading = document.getElementById('sxng-loading');
+            
+            const container = document.getElementById('urls') || document.getElementById('main_results');
+            if (container && shell) {{ container.prepend(shell); shell.style.display = 'block'; }}
 
             try {{
                 const ctx = new TextDecoder().decode(Uint8Array.from(atob(b64), c => c.charCodeAt(0)));
                 const res = await fetch('/gemini-stream', {{
                     method: 'POST',
                     headers: {{ 'Content-Type': 'application/json' }},
-                    body: JSON.stringify({{ q: q, context: ctx }})
+                    body: JSON.stringify({{ q: q, context: ctx, tk: tk }})
                 }});
                 
-                if (!res.ok) return;
+                if (!res.ok) {{ shell.style.display = 'none'; return; }}
 
                 const reader = res.body.getReader();
                 const decoder = new TextDecoder();
+                const cursor = document.createElement('span');
+                cursor.className = 'sxng-cursor';
                 
+                let started = false;
                 while (true) {{
                     const {{done, value}} = await reader.read();
                     if (done) break;
                     
                     const chunk = decoder.decode(value);
                     if (chunk) {{
-                        if (shell.style.getPropertyValue('display') !== 'block') {{
-                            shell.style.setProperty('display', 'block', 'important');
+                        if (!started) {{ 
+                            data.innerHTML = ""; 
+                            data.appendChild(cursor);
+                            started = true; 
                         }}
-                        data.innerText += chunk;
+                        cursor.before(chunk);
                     }}
                 }}
-            }} catch (e) {{ console.error(e); }}
+                cursor.remove();
+                if (!started) shell.style.display = 'none';
+            }} catch (e) {{ console.error(e); shell.style.display = 'none'; }}
         }})();
         </script>
         '''
