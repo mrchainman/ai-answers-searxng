@@ -24,7 +24,8 @@ class SXNGPlugin(Plugin):
         self.max_tokens = int(os.getenv('GEMINI_MAX_TOKENS', 500))
         self.temperature = float(os.getenv('GEMINI_TEMPERATURE', 0.2))
         self.base_url = os.getenv('OPENROUTER_BASE_URL', 'openrouter.ai')
-        self.secret = os.getenv('SXNG_LLM_SECRET', secrets.token_hex(32))
+        # Stable secret for multi-worker environments
+        self.secret = os.getenv('SXNG_LLM_SECRET') or hashlib.sha256(self.api_key.encode()).hexdigest()
 
     def init(self, app):
         @app.route('/gemini-stream', methods=['POST'])
@@ -34,26 +35,16 @@ class SXNGPlugin(Plugin):
             q = data.get('q', '')
             
             try:
-                ts, sig = token.split('.')
+                ts, sig = token.split('.', 1)
                 query_clean = q.strip()
-                expected = hashlib.sha256(f"{ts}|{query_clean}|{self.secret}".encode()).hexdigest()
+                expected = hashlib.sha256(f"{ts}{query_clean}{self.secret}".encode()).hexdigest()
                 if sig != expected or (time.time() - float(ts)) > 60:
                     abort(403)
             except: abort(403)
 
             context_text = data.get('context', '')
             if not self.api_key or not q:
-                return Response("Error: Missing Key or Query", status=400)
-
-            prompt = (
-                f"SYSTEM: Answer USER QUERY by integrating SEARCH RESULTS with expert knowledge.\n"
-                f"HIERARCHY: Use RESULTS for facts/data. Use KNOWLEDGE for context/synthesis.\n"
-                f"CONSTRAINTS: <4 sentences | Dense information | Complete thoughts.\n"
-                f"FALLBACK: If results are empty, answer from knowledge but note the lack of sources.\n\n"
-                f"SEARCH RESULTS:\n{context_text}\n\n"
-                f"USER QUERY: {q}\n\n"
-                f"ANSWER:"
-            )
+                return Response("Error: Missing Key", status=400)
 
             def generate_gemini():
                 host = "generativelanguage.googleapis.com"
@@ -63,7 +54,9 @@ class SXNGPlugin(Plugin):
                     payload = {"contents": [{"parts": [{"text": prompt}]}], "generationConfig": {"maxOutputTokens": self.max_tokens, "temperature": self.temperature}}
                     conn.request("POST", path, body=json.dumps(payload), headers={"Content-Type": "application/json"})
                     res = conn.getresponse()
-                    if res.status != 200: return
+                    if res.status != 200:
+                        logger.error(f"Gemini API Error {res.status}: {res.read().decode('utf-8')}")
+                        return
 
                     decoder = json.JSONDecoder()
                     buffer = ""
@@ -86,7 +79,7 @@ class SXNGPlugin(Plugin):
                                 buffer = buffer[idx:]
                             except json.JSONDecodeError: break
                     conn.close()
-                except Exception: pass
+                except Exception as e: logger.error(f"Gemini Stream Exception: {e}")
 
             def generate_openrouter():
                 try:
@@ -106,7 +99,9 @@ class SXNGPlugin(Plugin):
                     }
                     conn.request("POST", "/api/v1/chat/completions", body=json.dumps(payload), headers=headers)
                     res = conn.getresponse()
-                    if res.status != 200: return
+                    if res.status != 200:
+                        logger.error(f"OpenRouter API Error {res.status}: {res.read().decode('utf-8')}")
+                        return
 
                     decoder = json.JSONDecoder()
                     buffer = ""
@@ -125,7 +120,7 @@ class SXNGPlugin(Plugin):
                                     if content: yield content
                                 except: pass
                     conn.close()
-                except Exception: pass
+                except Exception as e: logger.error(f"OpenRouter Stream Exception: {e}")
 
             generator = generate_openrouter if self.provider == 'openrouter' else generate_gemini
             return Response(generator(), mimetype='text/plain', headers={'X-Accel-Buffering': 'no'})
