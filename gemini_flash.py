@@ -36,13 +36,11 @@ class SXNGPlugin(Plugin):
                 return Response("Error: Missing Key or Query", status=400)
 
             prompt = (
-                f"SYSTEM: Answer USER QUERY by integrating SEARCH RESULTS with expert knowledge.\n"
-                f"HIERARCHY: Use RESULTS for facts/data. Use KNOWLEDGE for context/synthesis.\n"
-                f"CONSTRAINTS: <4 sentences | Dense information | Complete thoughts.\n"
-                f"FALLBACK: If results are empty, answer from knowledge but note the lack of sources.\n\n"
-                f"SEARCH RESULTS:\n{context_text}\n\n"
-                f"USER QUERY: {q}\n\n"
-                f"ANSWER:"
+                f"Answer concisely (<4 sentences) using the provided search results.\n"
+                f"Prioritize results for facts. If results are empty, use general knowledge.\n\n"
+                f"Results:\n{context_text}\n\n"
+                f"Query: {q}\n\n"
+                f"Answer:"
             )
 
             def generate_gemini():
@@ -100,7 +98,7 @@ class SXNGPlugin(Plugin):
                         "Authorization": f"Bearer {self.api_key}",
                         "Content-Type": "application/json",
                         "HTTP-Referer": "https://github.com/cra88y/searxng-stream-gemini",
-                        "X-Title": "SearXNG Gemini Stream"
+                        "X-Title": "SearXNG Stream"
                     }
                     conn.request("POST", "/api/v1/chat/completions", body=json.dumps(payload), headers=headers)
                     res = conn.getresponse()
@@ -142,15 +140,15 @@ class SXNGPlugin(Plugin):
         js_q = json.dumps(search.search_query.query)
 
         html_payload = f'''
-        <article id="ai-shell" class="answer" style="display:none; margin-bottom: 1rem;">
-            <p id="ai-out" style="white-space: pre-wrap;"></p>
+        <article id="sxng-stream-box" class="answer" style="display:none; margin-bottom: 1rem;">
+            <p id="sxng-stream-data" style="white-space: pre-wrap;"></p>
         </article>
         <script>
         (async () => {{
             const q = {js_q};
             const b64 = "{b64_context}";
-            const shell = document.getElementById('ai-shell');
-            const out = document.getElementById('ai-out');
+            const shell = document.getElementById('sxng-stream-box');
+            const data = document.getElementById('sxng-stream-data');
 
             try {{
                 const ctx = new TextDecoder().decode(Uint8Array.from(atob(b64), c => c.charCodeAt(0)));
@@ -172,7 +170,7 @@ class SXNGPlugin(Plugin):
                     const chunk = decoder.decode(value);
                     if (chunk) {{
                         if (shell.style.display === 'none') shell.style.display = 'block';
-                        out.innerText += chunk;
+                        data.innerText += chunk;
                     }}
                 }}
             }} catch (e) {{ console.error(e); }}

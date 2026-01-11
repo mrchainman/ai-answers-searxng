@@ -110,7 +110,7 @@ class PluginTestCase(unittest.TestCase):
     def test_html_injection(self):
         response = self.app.get('/')
         content = response.data.decode('utf-8')
-        self.assertIn('<article id="ai-shell"', content)
+        self.assertIn('<article id="sxng-stream-box"', content)
         self.assertIn('/gemini-stream', content)
 
     def test_stream_endpoint(self):
