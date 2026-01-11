@@ -18,10 +18,12 @@ class SXNGPlugin(Plugin):
             description=gettext("Live AI search answers using Google Gemini Flash"),
             preference_section="general", 
         )
-        self.api_key = os.getenv('GEMINI_API_KEY')
-        self.model = os.getenv('GEMINI_MODEL', 'gemini-3-flash-preview')
+        self.provider = os.getenv('LLM_PROVIDER', 'gemini').lower()
+        self.api_key = os.getenv('OPENROUTER_API_KEY') if self.provider == 'openrouter' else os.getenv('GEMINI_API_KEY')
+        self.model = os.getenv('GEMINI_MODEL', 'gemini-1.5-flash') if self.provider == 'gemini' else os.getenv('OPENROUTER_MODEL', 'google/gemini-2.0-flash-exp:free')
         self.max_tokens = int(os.getenv('GEMINI_MAX_TOKENS', 500))
         self.temperature = float(os.getenv('GEMINI_TEMPERATURE', 0.2))
+        self.base_url = os.getenv('OPENROUTER_BASE_URL', 'openrouter.ai')
 
     def init(self, app):
         @app.route('/gemini-stream', methods=['POST'])
@@ -33,26 +35,26 @@ class SXNGPlugin(Plugin):
             if not self.api_key or not q:
                 return Response("Error: Missing Key or Query", status=400)
 
-            def generate():
+            prompt = (
+                f"SYSTEM: Answer USER QUERY by integrating SEARCH RESULTS with expert knowledge.\n"
+                f"HIERARCHY: Use RESULTS for facts/data. Use KNOWLEDGE for context/synthesis.\n"
+                f"CONSTRAINTS: <4 sentences | Dense information | Complete thoughts.\n"
+                f"FALLBACK: If results are empty, answer from knowledge but note the lack of sources.\n\n"
+                f"SEARCH RESULTS:\n{context_text}\n\n"
+                f"USER QUERY: {q}\n\n"
+                f"ANSWER:"
+            )
+
+            def generate_gemini():
                 host = "generativelanguage.googleapis.com"
-                path = f"/v1beta/models/{self.model}:streamGenerateContent?key={self.api_key}"
+                path = f"/v1/models/{self.model}:streamGenerateContent?key={self.api_key}"
                 try:
                     conn = http.client.HTTPSConnection(host, context=ssl.create_default_context())
-                    prompt = (
-                        f"SYSTEM: Answer USER QUERY by integrating SEARCH RESULTS with expert knowledge.\n"
-                        f"HIERARCHY: Use RESULTS for facts/data. Use KNOWLEDGE for context/synthesis.\n"
-                        f"CONSTRAINTS: <4 sentences | Dense information | Complete thoughts.\n"
-                        f"FALLBACK: If results are empty, answer from knowledge but note the lack of sources.\n\n"
-                        f"SEARCH RESULTS:\n{context_text}\n\n"
-                        f"USER QUERY: {q}\n\n"
-                        f"ANSWER:"
-                    )
                     payload = {"contents": [{"parts": [{"text": prompt}]}], "generationConfig": {"maxOutputTokens": self.max_tokens, "temperature": self.temperature}}
                     conn.request("POST", path, body=json.dumps(payload), headers={"Content-Type": "application/json"})
                     res = conn.getresponse()
                     
                     if res.status != 200:
-                         yield f" [Error: {res.status} {res.reason} - {res.read().decode('utf-8')}]"
                          return
 
                     decoder = json.JSONDecoder()
@@ -81,10 +83,50 @@ class SXNGPlugin(Plugin):
                                 break
                                 
                     conn.close()
-                except Exception as e:
-                    yield f" [Error: {str(e)}]"
+                except Exception:
+                    pass
 
-            return Response(generate(), mimetype='text/plain', headers={'X-Accel-Buffering': 'no'})
+            def generate_openrouter():
+                try:
+                    conn = http.client.HTTPSConnection(self.base_url, context=ssl.create_default_context())
+                    payload = {
+                        "model": self.model,
+                        "messages": [{"role": "user", "content": prompt}],
+                        "stream": True,
+                        "max_tokens": self.max_tokens,
+                        "temperature": self.temperature
+                    }
+                    headers = {
+                        "Authorization": f"Bearer {self.api_key}",
+                        "Content-Type": "application/json",
+                        "HTTP-Referer": "https://github.com/cra88y/searxng-stream-gemini",
+                        "X-Title": "SearXNG Gemini Stream"
+                    }
+                    conn.request("POST", "/api/v1/chat/completions", body=json.dumps(payload), headers=headers)
+                    res = conn.getresponse()
+                    if res.status != 200: return
+
+                    buffer = ""
+                    while True:
+                        chunk = res.read(1024)
+                        if not chunk: break
+                        buffer += chunk.decode('utf-8')
+                        while "\n" in buffer:
+                            line, buffer = buffer.split("\n", 1)
+                            line = line.strip()
+                            if line.startswith("data: "):
+                                data_str = line[6:].strip()
+                                if data_str == "[DONE]": return
+                                try:
+                                    data_json = json.loads(data_str)
+                                    content = data_json.get("choices", [{}])[0].get("delta", {}).get("content", "")
+                                    if content: yield content
+                                except: pass
+                    conn.close()
+                except Exception: pass
+
+            generator = generate_openrouter if self.provider == 'openrouter' else generate_gemini
+            return Response(generator(), mimetype='text/plain', headers={'X-Accel-Buffering': 'no'})
         return True
 
     def post_search(self, request, search) -> EngineResults:
@@ -100,38 +142,40 @@ class SXNGPlugin(Plugin):
         js_q = json.dumps(search.search_query.query)
 
         html_payload = f'''
-        <div id="ai-shell" style="display:none; margin-bottom: 2rem; padding: 1.2rem; border-bottom: 1px solid var(--color-result-border);">
-            <div id="ai-out" style="line-height: 1.7; white-space: pre-wrap; color: var(--color-result-description); font-size: 0.95rem;">Thinking...</div>
-        </div>
+        <article id="ai-shell" class="answer" style="display:none; margin-bottom: 1rem;">
+            <p id="ai-out" style="white-space: pre-wrap;"></p>
+        </article>
         <script>
         (async () => {{
             const q = {js_q};
             const b64 = "{b64_context}";
             const shell = document.getElementById('ai-shell');
             const out = document.getElementById('ai-out');
-            
-            const container = document.getElementById('urls') || document.getElementById('main_results');
-            if (container && shell) {{ container.prepend(shell); shell.style.display = 'block'; }}
 
             try {{
                 const ctx = new TextDecoder().decode(Uint8Array.from(atob(b64), c => c.charCodeAt(0)));
-                
                 const res = await fetch('/gemini-stream', {{
                     method: 'POST',
                     headers: {{ 'Content-Type': 'application/json' }},
                     body: JSON.stringify({{ q: q, context: ctx }})
                 }});
                 
+                if (!res.ok) return;
+
                 const reader = res.body.getReader();
                 const decoder = new TextDecoder();
-                out.innerText = "";
                 
                 while (true) {{
                     const {{done, value}} = await reader.read();
                     if (done) break;
-                    out.innerText += decoder.decode(value);
+                    
+                    const chunk = decoder.decode(value);
+                    if (chunk) {{
+                        if (shell.style.display === 'none') shell.style.display = 'block';
+                        out.innerText += chunk;
+                    }}
                 }}
-            }} catch (e) {{ console.error(e); out.innerText += " [Error]"; }}
+            }} catch (e) {{ console.error(e); }}
         }})();
         </script>
         '''

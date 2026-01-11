@@ -1,24 +1,25 @@
-# SearXNG Gemini Stream
+# SearXNG Gemini & OpenRouter Stream
 
-A SearXNG plugin that streams an AI response using results as grounding context to an Answer box at the top of results.
+A SearXNG plugin that streams AI responses using search results as grounding context. Supports Google Gemini and OpenAI-compatible providers (OpenRouter, Ollama, etc.).
 
 ## Configuration
 
 Set the following environment variables:
-- `GEMINI_API_KEY`: Your Google Gemini API key.
-- `GEMINI_MODEL`: (Optional) Defaults to `gemini-3-flash-preview`.
-- `GEMINI_MAX_TOKENS`: (Optional) Defaults to `500`.
-- `GEMINI_TEMPERATURE`: (Optional) Defaults to `0.2`.
 
-### settings.yml
-Add this to your SearXNG configuration file to enable the plugin:
+### General
+- `LLM_PROVIDER`: `gemini` (default) or `openrouter`.
+- `GEMINI_MAX_TOKENS`: Defaults to `500`.
+- `GEMINI_TEMPERATURE`: Defaults to `0.2`.
 
-```yaml
-plugins:
-  - name: gemini_flash
-    active: true
-```
+### Google Gemini
+- `GEMINI_API_KEY`: Your Google AI API key.
+- `GEMINI_MODEL`: Defaults to `gemini-1.5-flash`.
+
+### OpenRouter / OpenAI / Ollama
+- `OPENROUTER_API_KEY`: Your API key.
+- `OPENROUTER_MODEL`: e.g., `meta-llama/llama-3-8b-instruct:free`.
+- `OPENROUTER_BASE_URL`: Defaults to `openrouter.ai`. (Change to `localhost:11434` for Ollama).
 
 ## Installation
 
-Place `gemini_flash.py` into the `searx/plugins` directory of your instance.
+Place `gemini_flash.py` into the `searx/plugins` directory of your instance and enable it in `settings.yml`.
