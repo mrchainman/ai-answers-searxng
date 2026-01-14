@@ -228,6 +228,7 @@ class SXNGPlugin(Plugin):
                             }}
                         }}
                         cursor.remove();
+                        data.textContent = data.textContent.trimEnd();
                         if (!started) {{ if (wrapper) wrapper.remove(); else box.remove(); }}
                     }} catch (e) {{ console.error(e); if (wrapper) wrapper.remove(); else box.remove(); }}
                 }})();
