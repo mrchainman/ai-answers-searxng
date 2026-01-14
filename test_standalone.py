@@ -111,7 +111,7 @@ class PluginTestCase(unittest.TestCase):
         response = self.app.get('/')
         content = response.data.decode('utf-8')
         self.assertIn('<article id="sxng-stream-box"', content)
-        self.assertIn('/gemini-stream', content)
+        self.assertIn('/ai-stream', content)
 
     def test_stream_endpoint(self):
         # Trigger index to generate a response containing the token
@@ -136,7 +136,7 @@ class PluginTestCase(unittest.TestCase):
             "tk": token
         }
         
-        response = self.app.post('/gemini-stream', json=payload)
+        response = self.app.post('/ai-stream', json=payload)
         self.assertEqual(response.status_code, 200)
         
         # Note: If the API returns a 404/429, data will be empty due to silent error handling.

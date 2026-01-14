@@ -18,8 +18,8 @@ class SXNGPlugin(Plugin):
         super().__init__(plg_cfg)
         self.info = PluginInfo(
             id=self.id,
-            name=gettext("Gemini Flash Streaming"),
-            description=gettext("Live AI search answers using Google Gemini Flash"),
+            name=gettext("AI Answers Plugin"),
+            description=gettext("Live AI search answers using AI providers."),
             preference_section="general", 
         )
         self.provider = os.getenv('LLM_PROVIDER', 'openrouter').lower()
@@ -242,5 +242,5 @@ class SXNGPlugin(Plugin):
             '''
             search.result_container.answers.add(results.types.Answer(answer=Markup(html_payload)))
         except Exception as e:
-            logger.error(f"Gemini Flash plugin error: {e}")
+            logger.error(f"AI Answers plugin error: {e}")
         return results
