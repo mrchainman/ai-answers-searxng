@@ -1,4 +1,5 @@
 # AI Answers for SearXNG
+
 **Does not block result loading time.**
 
 A SearXNG plugin that generates an AI answer using search results as RAG grounding context. Supports Google Gemini and OpenAI-compatible providers (OpenRouter, Ollama, etc.).
@@ -9,7 +10,7 @@ Place `ai_answers.py` into the `searx/plugins` directory of your instance (or mo
 
 ```yaml
 plugins:
-  - name: ai_answers
+  searx.plugins.ai_answers.SXNGPlugin:  
     active: true
 ```
 
