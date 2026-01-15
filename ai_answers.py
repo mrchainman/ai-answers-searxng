@@ -26,11 +26,11 @@ class SXNGPlugin(Plugin):
         self.api_key = os.getenv('OPENROUTER_API_KEY') if self.provider == 'openrouter' else os.getenv('GEMINI_API_KEY')
         self.model = os.getenv('GEMINI_MODEL', 'gemma-3-27b-it') if self.provider == 'gemini' else os.getenv('OPENROUTER_MODEL', 'google/gemma-3-27b-it:free')
         try:
-            self.max_tokens = int(os.getenv('GEMINI_MAX_TOKENS', 500))
+            self.max_tokens = int(os.getenv('RESPONSE_MAX_TOKENS', 500))
         except ValueError:
             self.max_tokens = 500
         try:
-            self.temperature = float(os.getenv('GEMINI_TEMPERATURE', 0.2))
+            self.temperature = float(os.getenv('RESPONSE_TEMPERATURE', 0.2))
         except ValueError:
             self.temperature = 0.2
         self.base_url = os.getenv('OPENROUTER_BASE_URL', 'openrouter.ai')
@@ -74,6 +74,7 @@ class SXNGPlugin(Plugin):
             def generate_gemini():
                 host = "generativelanguage.googleapis.com"
                 path = f"/v1/models/{self.model}:streamGenerateContent?key={self.api_key}"
+                conn = None
                 try:
                     conn = http.client.HTTPSConnection(host, timeout=CONNECTION_TIMEOUT_SEC, context=ssl.create_default_context())
                     payload = {"contents": [{"parts": [{"text": prompt}]}], "generationConfig": {"maxOutputTokens": self.max_tokens, "temperature": self.temperature}}
@@ -103,12 +104,20 @@ class SXNGPlugin(Plugin):
                                         if text: yield text
                                 buffer = buffer[idx:]
                             except json.JSONDecodeError: break
-                    conn.close()
-                except Exception as e: logger.error(f"Gemini Stream Exception: {e}")
+                except Exception as e:
+                    logger.error(f"Gemini Stream Exception: {e}")
+                finally:
+                    if conn: conn.close()
 
             def generate_openrouter():
+                conn = None
                 try:
-                    conn = http.client.HTTPSConnection(self.base_url, timeout=CONNECTION_TIMEOUT_SEC, context=ssl.create_default_context())
+                    # Support HTTP for localhost/Ollama
+                    is_local = self.base_url.startswith('localhost') or self.base_url.startswith('127.')
+                    if is_local:
+                        conn = http.client.HTTPConnection(self.base_url, timeout=CONNECTION_TIMEOUT_SEC)
+                    else:
+                        conn = http.client.HTTPSConnection(self.base_url, timeout=CONNECTION_TIMEOUT_SEC, context=ssl.create_default_context())
                     payload = {
                         "model": self.model,
                         "messages": [{"role": "user", "content": prompt}],
@@ -122,7 +131,9 @@ class SXNGPlugin(Plugin):
                         "HTTP-Referer": "https://github.com/searxng/searxng",
                         "X-Title": "SearXNG LLM Plugin"
                     }
-                    conn.request("POST", "/api/v1/chat/completions", body=json.dumps(payload), headers=headers)
+                    # Ollama uses /v1/... while OpenRouter uses /api/v1/...
+                    api_path = "/v1/chat/completions" if is_local else "/api/v1/chat/completions"
+                    conn.request("POST", api_path, body=json.dumps(payload), headers=headers)
                     res = conn.getresponse()
                     if res.status != 200:
                         logger.error(f"OpenRouter API Error {res.status}: {res.read().decode('utf-8')}")
@@ -145,8 +156,10 @@ class SXNGPlugin(Plugin):
                                     if content: yield content
                                 except json.JSONDecodeError:
                                     pass
-                    conn.close()
-                except Exception as e: logger.error(f"OpenRouter Stream Exception: {e}")
+                except Exception as e:
+                    logger.error(f"OpenRouter Stream Exception: {e}")
+                finally:
+                    if conn: conn.close()
 
             generator = generate_openrouter if self.provider == 'openrouter' else generate_gemini
             return Response(generator(), mimetype='text/event-stream', headers={
@@ -180,11 +193,17 @@ class SXNGPlugin(Plugin):
             <article id="sxng-stream-box" class="answer" style="display:none; margin-bottom: 1rem;">
                 <style>
                     @keyframes sxng-blink {{ 0%, 100% {{ opacity: 1; }} 50% {{ opacity: 0; }} }}
+                    @keyframes sxng-pulse {{ 0%, 100% {{ opacity: 0.4; }} 50% {{ opacity: 0.9; }} }}
                     .sxng-cursor {{ 
                         display: inline-block; width: 0.5rem; height: 1rem; 
                         background: var(--color-result-description); 
                         margin-left: 2px; vertical-align: middle;
                         animation: sxng-blink 1s step-end infinite;
+                    }}
+                    .sxng-thinking {{
+                        color: var(--color-result-description);
+                        font-style: italic;
+                        animation: sxng-pulse 1.5s ease-in-out infinite;
                     }}
                 </style>
                 <p id="sxng-stream-data" style="white-space: pre-wrap; color: var(--color-result-description); font-size: 0.95rem;"></p>
@@ -200,12 +219,23 @@ class SXNGPlugin(Plugin):
                     
                     try {{
                         const ctx = new TextDecoder().decode(Uint8Array.from(atob(b64), c => c.charCodeAt(0)));
+                        
+                        // Show "Thinking..." placeholder while waiting for LLM
+                        data.innerHTML = '<span class="sxng-thinking">Thinking...</span>';
+                        if (wrapper) wrapper.style.display = '';
+                        box.style.display = 'block';
+                        
+                        const controller = new AbortController();
+                        const timeoutId = setTimeout(() => controller.abort(), 60000);
+                        
                         const res = await fetch('/ai-stream', {{
                             method: 'POST',
                             headers: {{ 'Content-Type': 'application/json' }},
-                            body: JSON.stringify({{ q: q, context: ctx, tk: tk }})
+                            body: JSON.stringify({{ q: q, context: ctx, tk: tk }}),
+                            signal: controller.signal
                         }});
                         
+                        clearTimeout(timeoutId);
                         if (!res.ok) {{ if (wrapper) wrapper.remove(); else box.remove(); return; }}
 
                         const reader = res.body.getReader();
@@ -224,9 +254,8 @@ class SXNGPlugin(Plugin):
                                 if (!started) {{
                                     text = text.replace(/^[\\s.,;:!?]+/, '');
                                     if (!text) continue;
+                                    data.textContent = '';  // Clear "Thinking..."
                                     data.appendChild(cursor);
-                                    if (wrapper) wrapper.style.display = '';
-                                    box.style.display = 'block';
                                     started = true; 
                                 }}
                                 cursor.before(text);

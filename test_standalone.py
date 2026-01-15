@@ -139,7 +139,7 @@ class PluginTestCase(unittest.TestCase):
         response = self.app.post('/ai-stream', json=payload)
         self.assertEqual(response.status_code, 200)
         
-        # Note: If the API returns a 404/429, data will be empty due to silent error handling.
+        # If the API returns a 404/429, data will be empty due to silent error handling.
         # This test ensures the endpoint exists and responds with 200.
         data = response.data.decode('utf-8')
         print(f"\n[Test] Received {len(data)} bytes from {plugin.provider}")
