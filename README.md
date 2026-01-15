@@ -37,7 +37,7 @@ Set the following environment variables:
 
 ## How It Works
 
-After search completes, the plugin extracts the top 6 results as context. A client-side script calls the stream endpoint with a signed token. The LLM response streams back to update UI dynamically.
+After search completes, the plugin extracts 6 top results as context. A client-side script calls the stream endpoint with a signed token. The LLM response streams back to update UI dynamically.
 
 ## Ollama (Local)
 
