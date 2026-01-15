@@ -2,8 +2,10 @@
 
 **Does not block result loading time.**
 
-A SearXNG plugin that generates an AI answer using search results as RAG grounding context. Supports Google Gemini and OpenAI-compatible providers (OpenRouter, Ollama, etc.).
+A SearXNG plugin that generates an AI answer using search results as RAG grounding context. Supports Google Gemini and OpenAI-compatible providers (OpenRouter, Ollama, etc.).  
+
 Features token by token UI updates as response is recieved.
+
 ## Installation
 
 Place `ai_answers.py` into the `searx/plugins` directory of your instance (or mount it in a container) and enable it in `settings.yml`:
@@ -21,8 +23,8 @@ Set the following environment variables:
 ### General
 
 - `LLM_PROVIDER`: `openrouter` (default) or `gemini`.
-- `GEMINI_MAX_TOKENS`: Defaults to `500`.
-- `GEMINI_TEMPERATURE`: Defaults to `0.2`.
+- `RESPONSE_MAX_TOKENS`: Defaults to `500`.
+- `RESPONSE_TEMPERATURE`: Defaults to `0.2`.
 
 ### OpenRouter / OpenAI / Ollama
 
@@ -37,7 +39,7 @@ Set the following environment variables:
 
 ## How It Works
 
-After search completes, the plugin extracts 6 top results as context. A client-side script calls the stream endpoint with a signed token. The LLM response streams back to update UI dynamically.
+After search completes, the plugin extracts the top 6 results as context. A client-side script calls the stream endpoint with a signed token. The LLM response streams back. Token by token rendering is soon.
 
 ## Ollama (Local)
 
