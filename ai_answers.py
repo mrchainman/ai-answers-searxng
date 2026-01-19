@@ -23,7 +23,9 @@ class SXNGPlugin(Plugin):
             preference_section="general", 
         )
         self.provider = os.getenv('LLM_PROVIDER', 'openrouter').lower()
-        self.api_key = os.getenv('OPENROUTER_API_KEY') if self.provider == 'openrouter' else os.getenv('GEMINI_API_KEY')
+        # TODO: Create a full if statement
+        # self.api_key = os.getenv('OPENROUTER_API_KEY') if self.provider == 'openrouter' else os.getenv('GEMINI_API_KEY')
+        self.api_key = os.getenv('OPENROUTER_API_KEY')
         self.model = os.getenv('GEMINI_MODEL', 'gemma-3-27b-it') if self.provider == 'gemini' else os.getenv('OPENROUTER_MODEL', 'google/gemma-3-27b-it:free')
         try:
             self.max_tokens = int(os.getenv('RESPONSE_MAX_TOKENS', 500))
@@ -161,7 +163,79 @@ class SXNGPlugin(Plugin):
                 finally:
                     if conn: conn.close()
 
-            generator = generate_openrouter if self.provider == 'openrouter' else generate_gemini
+            def generate_openai():
+                conn = None
+                try:
+                    host = self.base_url
+                    headers = {
+                        "Authorization": f"Bearer {self.api_key}",
+                        "Content-Type": "application/json",
+                        "HTTP-Referer": "https://github.com/searxng/searxng",
+                        "X-Title": "SearXNG LLM Plugin",
+                    }
+                    # TODO: make more sense out of naming
+                    url = f"/api/chat/completions"
+
+                    payload = {
+                            "model": "llama3.2:latest", # TODO: Make modular
+                            "messages": [
+                                {
+                                    "role": "developer",
+                                    "content": "You are a helpful assistant."
+                                },
+                                {
+                                    "role": "user",
+                                    "content": "Hello!"
+                                }
+                                ]
+                            }
+
+
+
+                    payload = {
+                        "model": self.model,
+                        "messages": [{"role": "user", "content": prompt}],
+                        "stream": True,
+                        "max_tokens": self.max_tokens,
+                        "temperature": self.temperature
+                    }
+                    # TODO: Naming convention
+                    conn = http.client.HTTPConnection(self.base_url, timeout=CONNECTION_TIMEOUT_SEC)
+                    conn.request("POST", url, body=json.dumps(payload), headers=headers)
+                    res = conn.getresponse()
+
+                    decoder = json.JSONDecoder()
+                    buffer = ""
+                    while True:
+                        chunk = res.read(128)
+                        if not chunk: break
+                        buffer += chunk.decode('utf-8')
+                        while "\n" in buffer:
+                            line, buffer = buffer.split("\n", 1)
+                            if line.startswith("data: "):
+                                data_str = line[6:].strip()
+                                if data_str == "[DONE]": return
+                                try:
+                                    obj, _ = decoder.raw_decode(data_str)
+                                    content = obj.get("choices", [{}])[0].get("delta", {}).get("content", "")
+                                    if content: yield content
+                                except json.JSONDecodeError:
+                                    pass
+
+                except Exception as e:
+                    logger.error(f"OpenAI (openwebui) Stream Exception: {e}")
+                    logger.error(f"HERE: url was {url}")
+                    
+                finally:
+                    if conn: conn.close()
+
+            if self.provider == 'openai':
+                generator = generate_openai
+            elif self.provider == 'openrouter':
+                generator = generate_openrouter
+            elif self.provider == 'gemini':
+                generator = generate_gemini
+            # generator = generate_openrouter if self.provider == 'openrouter' else generate_gemini
             return Response(generator(), mimetype='text/event-stream', headers={
                 'X-Accel-Buffering': 'no',
                 'Cache-Control': 'no-cache, no-store',
